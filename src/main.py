@@ -536,6 +536,36 @@ def important_preview(result: str, decryptor_name: str) -> str:
     return json.dumps(preview, indent=4, ensure_ascii=False)
 
 
+def v2ray_links_from_result(result: str, file_name: str, decryptor_name: str) -> list[str]:
+    try:
+        parsed = parse_nested_json(json.loads(result))
+    except Exception:
+        return []
+
+    found: Dict[str, Any] = {"app": decryptor_name}
+    collect_preview_fields(parsed, found)
+    v2ray_config = found.get("v2ray_config")
+    if is_empty_output_value(v2ray_config):
+        return []
+
+    links: list[str] = []
+    name = v2ray_link_name(found, file_name)
+    for entry in v2ray_server_entries(v2ray_config):
+        protocol = str(entry.get("protocol") or "").strip().lower()
+        link: Optional[str] = None
+        if protocol == "vmess":
+            link = vmess_link(entry, name)
+        elif protocol == "trojan":
+            link = trojan_link(entry, name)
+        elif protocol == "vless":
+            link = vless_link(entry, name)
+
+        if link and link not in links:
+            links.append(link)
+
+    return links
+
+
 def requester_name(sender: Dict[str, Any]) -> str:
     name = sender.get("username")
     if not name:

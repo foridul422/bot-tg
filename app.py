@@ -27,6 +27,8 @@ from main import (  # noqa: E402
     result_keyboard,
     run_decryptors,
     start_keyboard,
+    v2ray_links_from_result,
+    v2ray_links_message,
 )
 
 app = Flask(__name__)
@@ -41,6 +43,25 @@ def bot_token() -> str:
     if not token:
         raise RuntimeError("BOT_TOKEN missing")
     return token
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    value = env_text(name)
+    if not value:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def can_send_import_links(sender: Dict[str, Any], chat: Dict[str, Any]) -> bool:
+    if not env_bool("ENABLE_IMPORT_LINKS"):
+        return False
+
+    allowed_users = parse_allowed_users(env_text("ALLOWED_USER_IDS"))
+    sender_id = sender.get("id")
+    if allowed_users:
+        return sender_id in allowed_users
+
+    return chat.get("type") == "private"
 
 
 class TelegramClient:
@@ -204,6 +225,10 @@ def handle_update(update: Dict[str, Any]) -> None:
     if command == "/start" or command == "/help":
         client.send_message(int(chat_id), help_text(), parse_mode="HTML", reply_markup=start_keyboard())
         return
+    if command == "/id":
+        user_id = sender.get("id") or "unknown"
+        client.send_message(int(chat_id), f"Your Telegram ID: {user_id}")
+        return
     if command == "/stats":
         client.send_message(int(chat_id), "Stats feature ekhon off ache.")
         return
@@ -284,6 +309,15 @@ def handle_update(update: Dict[str, Any]) -> None:
         reply_to_message_id=int(reply_to_message_id) if reply_to_message_id else None,
         reply_markup=result_keyboard(),
     )
+    if can_send_import_links(sender, chat):
+        links = v2ray_links_from_result(result, file_name, decryptor_name)
+        if links:
+            client.send_message(
+                int(chat_id),
+                v2ray_links_message(links),
+                parse_mode="HTML",
+                reply_to_message_id=int(reply_to_message_id) if reply_to_message_id else None,
+            )
     client.edit_message(int(chat_id), processing_message_id, f"Done | {decryptor_name} | {elapsed_ms}ms")
 
 
