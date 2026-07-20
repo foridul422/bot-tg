@@ -1,0 +1,12 @@
+.wrangler/
+.dev.vars
+__pycache__/
+*.pyc
+.venv/
+.venv-render/
+.venv-workers/
+.venv-old/
+.venv-workers-old/
+python_modules/
+pylock.toml
+uv.lock
