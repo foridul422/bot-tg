@@ -206,12 +206,20 @@ def remember_copy_text(title: str, text: str, chat_id: int) -> str:
     return f"copy:{key}"
 
 
-def copy_button(label: str, text: str, chat_id: int) -> Dict[str, Any]:
+def copy_button(
+    label: str,
+    text: str,
+    chat_id: int,
+    send_long_text_as_message: bool = True,
+) -> Dict[str, Any]:
     text = (text or "").strip()
     if text and len(text) <= 256:
         return {"text": label, "copy_text": {"text": text}}
 
     fallback = text or f"{label} not found"
+    if not send_long_text_as_message:
+        return {"text": label, "callback_data": "copy_direct_limit" if text else "copy_missing"}
+
     return {"text": label, "callback_data": remember_copy_text(label, fallback, chat_id)}
 
 
@@ -229,7 +237,7 @@ def action_result_keyboard(
         if links:
             return {
                 "inline_keyboard": [
-                    [copy_button("Copy V2RAY URL", "\n".join(links), chat_id)],
+                    [copy_button("Copy V2RAY URL", links[0], chat_id, send_long_text_as_message=False)],
                     [copy_button("Note", result_note_from_result(result, file_name, decryptor_name), chat_id), OWNER_BUTTON],
                 ]
             }
@@ -314,13 +322,13 @@ class TelegramClient:
         except Exception as exc:
             print(f"editMessage failed: {exc}")
 
-    def answer_callback_query(self, callback_query_id: str, text: str) -> None:
+    def answer_callback_query(self, callback_query_id: str, text: str, show_alert: bool = False) -> None:
         self.call(
             "answerCallbackQuery",
             {
                 "callback_query_id": callback_query_id,
                 "text": text,
-                "show_alert": False,
+                "show_alert": show_alert,
             },
         )
 
@@ -399,6 +407,19 @@ def handle_callback(client: TelegramClient, callback_query: Dict[str, Any]) -> N
             return
         if query_id:
             client.answer_callback_query(query_id, "This button expired. Please send the file again.")
+        return
+
+    if data == "copy_direct_limit":
+        if query_id:
+            client.answer_callback_query(
+                query_id,
+                "Telegram direct copy supports up to 256 characters. This V2Ray link is too long.",
+                show_alert=True,
+            )
+        return
+    if data == "copy_missing":
+        if query_id:
+            client.answer_callback_query(query_id, "Nothing to copy.", show_alert=True)
         return
 
     if query_id:
