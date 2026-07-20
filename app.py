@@ -1,6 +1,8 @@
+import html
 import os
 import sys
 import time
+import uuid
 from typing import Any, Dict, Optional
 from urllib.parse import parse_qs, urlparse
 
@@ -13,6 +15,7 @@ from main import (  # noqa: E402
     DEFAULT_MAX_FILE_SIZE,
     DEFAULT_SPAM_WINDOW_SECONDS,
     LAST_USER_ACTION,
+    chunk_for_html_code,
     decryptor_for_file,
     decryptor_title,
     designed_message,
@@ -21,18 +24,22 @@ from main import (  # noqa: E402
     help_text,
     important_preview,
     is_npv_file,
+    payload_from_result,
     parse_allowed_users,
     parse_positive_int,
     requester_link,
     result_keyboard,
+    result_note_from_result,
     run_decryptors,
+    ssh_info_from_result,
     start_keyboard,
     v2ray_links_from_result,
-    v2ray_links_message,
 )
 
 app = Flask(__name__)
 RUNTIME_FULL_OUTPUT_CHAT_IDS: set[int] = set()
+OWNER_BUTTON = {"text": "Owner", "url": "https://t.me/Foridul_002"}
+COPY_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
 def env_text(name: str, default: str = "") -> str:
@@ -112,6 +119,75 @@ def full_output_status_line(sender: Dict[str, Any], chat: Dict[str, Any]) -> str
         f"Owner matched: {owner_status}\n"
         f"Full output here: {enabled_status}"
     )
+
+
+def remember_copy_text(title: str, text: str, chat_id: int) -> str:
+    key = uuid.uuid4().hex[:16]
+    COPY_CACHE[key] = {
+        "title": title,
+        "text": text,
+        "chat_id": chat_id,
+        "created_at": time.time(),
+    }
+
+    while len(COPY_CACHE) > 80:
+        COPY_CACHE.pop(next(iter(COPY_CACHE)))
+
+    return f"copy:{key}"
+
+
+def copy_button(label: str, text: str, chat_id: int) -> Dict[str, Any]:
+    text = (text or "").strip()
+    if text and len(text) <= 256:
+        return {"text": label, "copy_text": {"text": text}}
+
+    fallback = text or f"{label} not found"
+    return {"text": label, "callback_data": remember_copy_text(label, fallback, chat_id)}
+
+
+def action_result_keyboard(
+    result: str,
+    file_name: str,
+    decryptor_name: str,
+    sender: Dict[str, Any],
+    chat: Dict[str, Any],
+) -> Dict[str, Any]:
+    chat_id = int_value(chat.get("id")) or 0
+
+    if can_send_import_links(sender, chat):
+        links = v2ray_links_from_result(result, file_name, decryptor_name)
+        if links:
+            return {
+                "inline_keyboard": [
+                    [copy_button("Copy V2RAY URL", "\n".join(links), chat_id)],
+                    [copy_button("Note", result_note_from_result(result, file_name, decryptor_name), chat_id), OWNER_BUTTON],
+                ]
+            }
+
+    if can_send_sensitive_fields(sender, chat):
+        ssh_info = ssh_info_from_result(result, decryptor_name)
+        payload = payload_from_result(result, decryptor_name)
+        if ssh_info or payload:
+            return {
+                "inline_keyboard": [
+                    [copy_button("Copy SSH info", ssh_info, chat_id)],
+                    [copy_button("Copy payload", payload, chat_id), OWNER_BUTTON],
+                ]
+            }
+
+    return result_keyboard()
+
+
+def send_copy_text(client: "TelegramClient", chat_id: int, title: str, text: str) -> None:
+    first = True
+    for chunk in chunk_for_html_code(text or " "):
+        heading = f"<b>{html.escape(title)}</b>\n\n" if first else ""
+        client.send_message(
+            chat_id,
+            f"{heading}<code>{html.escape(chunk, quote=False)}</code>",
+            parse_mode="HTML",
+        )
+        first = False
 
 
 class TelegramClient:
@@ -236,6 +312,18 @@ def handle_callback(client: TelegramClient, callback_query: Dict[str, Any]) -> N
     message = callback_query.get("message") or {}
     chat = message.get("chat") if isinstance(message, dict) else {}
     chat_id = chat.get("id") if isinstance(chat, dict) else None
+
+    if data.startswith("copy:"):
+        item = COPY_CACHE.get(data.split(":", 1)[1])
+        cached_chat_id = int_value(item.get("chat_id")) if isinstance(item, dict) else None
+        if item and chat_id and cached_chat_id == int(chat_id):
+            if query_id:
+                client.answer_callback_query(query_id, "Long text sent below.")
+            send_copy_text(client, int(chat_id), str(item.get("title") or "Copy text"), str(item.get("text") or ""))
+            return
+        if query_id:
+            client.answer_callback_query(query_id, "This button expired. Please send the file again.")
+        return
 
     if query_id:
         client.answer_callback_query(
@@ -397,17 +485,8 @@ def handle_update(update: Dict[str, Any]) -> None:
         ),
         parse_mode="HTML",
         reply_to_message_id=int(reply_to_message_id) if reply_to_message_id else None,
-        reply_markup=result_keyboard(),
+        reply_markup=action_result_keyboard(result, file_name, decryptor_name, sender, chat),
     )
-    if can_send_import_links(sender, chat):
-        links = v2ray_links_from_result(result, file_name, decryptor_name)
-        if links:
-            client.send_message(
-                int(chat_id),
-                v2ray_links_message(links),
-                parse_mode="HTML",
-                reply_to_message_id=int(reply_to_message_id) if reply_to_message_id else None,
-            )
     client.edit_message(int(chat_id), processing_message_id, f"Done | {decryptor_name} | {elapsed_ms}ms")
 
 

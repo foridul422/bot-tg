@@ -443,26 +443,50 @@ def collect_preview_fields(value: Any, found: Dict[str, Any]) -> None:
     key_aliases = {
         "app": "app",
         "name": "name",
+        "configname": "name",
         "ps": "name",
+        "note": "note",
+        "notes": "note",
         "type": "type",
         "protocol": "protocol",
+        "ip": "server",
         "address": "server",
         "add": "server",
         "server": "server",
+        "serverhost": "server",
+        "hostaddress": "server",
+        "sshhost": "server",
+        "sshserver": "server",
         "host": "host",
         "remotehost": "server",
+        "remoteaddress": "server",
         "proxyhost": "proxy_host",
         "proxy": "proxy",
         "port": "port",
         "serverport": "port",
+        "sshport": "port",
+        "remoteport": "port",
         "proxyport": "proxy_port",
         "payload": "payload",
+        "custompayload": "payload",
         "sni": "sni",
         "servernameindication": "sni",
         "uuid": "uuid",
         "id": "uuid",
+        "sshfield": "ssh_info",
+        "ssh": "ssh_info",
+        "sshinfo": "ssh_info",
+        "user": "username",
         "username": "username",
+        "sshuser": "username",
+        "sshusername": "username",
+        "authuser": "username",
+        "pass": "password",
+        "passwd": "password",
         "password": "password",
+        "sshpass": "password",
+        "sshpassword": "password",
+        "authpass": "password",
         "network": "network",
         "net": "network",
         "transportnetwork": "network",
@@ -473,7 +497,11 @@ def collect_preview_fields(value: Any, found: Dict[str, Any]) -> None:
         "scy": "encryption",
         "config": "v2ray_config",
         "v2rayconfig": "v2ray_config",
+        "v2rrawjson": "v2ray_config",
+        "v2rayrawjson": "v2ray_config",
+        "overwriteserverdata": "v2ray_config",
     }
+    preferred_v2ray_keys = {"v2rayconfig", "v2rrawjson", "v2rayrawjson", "overwriteserverdata"}
 
     if isinstance(value, dict):
         for key, item in value.items():
@@ -481,12 +509,83 @@ def collect_preview_fields(value: Any, found: Dict[str, Any]) -> None:
             alias = key_aliases.get(normalized)
             if alias and alias not in found and not is_empty_output_value(item):
                 found[alias] = parse_nested_json(item) if alias == "v2ray_config" else compact_value(item)
+            elif (
+                alias == "v2ray_config"
+                and normalized in preferred_v2ray_keys
+                and not is_empty_output_value(item)
+            ):
+                found[alias] = parse_nested_json(item)
             collect_preview_fields(item, found)
         return
 
     if isinstance(value, list):
         for item in value:
             collect_preview_fields(item, found)
+
+
+def preview_fields_from_result(result: str, decryptor_name: str) -> Dict[str, Any]:
+    try:
+        parsed = parse_nested_json(json.loads(result))
+    except Exception:
+        return {"app": decryptor_name}
+
+    found: Dict[str, Any] = {"app": decryptor_name}
+    collect_preview_fields(parsed, found)
+    return found
+
+
+def clean_action_text(value: Any, max_len: int = 2400) -> str:
+    if is_empty_output_value(value):
+        return ""
+    text = one_line_value(value, max_len).strip()
+    return "" if text.lower() in {"false", "null", "none"} else text
+
+
+def result_note_from_result(result: str, file_name: str, decryptor_name: str) -> str:
+    found = preview_fields_from_result(result, decryptor_name)
+    pieces: list[str] = []
+
+    note = clean_action_text(found.get("note"), 180)
+    name = clean_action_text(found.get("name"), 180)
+    app = clean_action_text(found.get("app") or decryptor_name, 80)
+    config_type = clean_action_text(found.get("type") or found.get("protocol"), 80)
+    server = clean_action_text(found.get("server") or found.get("host"), 160)
+
+    if note:
+        pieces.append(note)
+    elif name:
+        pieces.append(name)
+    elif file_name:
+        pieces.append(file_name)
+
+    if app:
+        pieces.append(f"App: {app}")
+    if config_type:
+        pieces.append(f"Type: {config_type.upper()}")
+    if server:
+        pieces.append(f"Server: {server}")
+
+    return " | ".join(dict.fromkeys(pieces)) or f"App: {decryptor_name}"
+
+
+def ssh_info_from_result(result: str, decryptor_name: str) -> str:
+    found = preview_fields_from_result(result, decryptor_name)
+    direct = clean_action_text(found.get("ssh_info"))
+    if direct and "@" in direct and direct.count(":") >= 2:
+        return direct
+
+    server = clean_action_text(found.get("server") or found.get("host"))
+    port = clean_action_text(found.get("port"), 60)
+    username = clean_action_text(found.get("username"), 240)
+    password = clean_action_text(found.get("password"), 240)
+    if all((server, port, username, password)):
+        return f"{server}:{port}@{username}:{password}"
+
+    return direct
+
+
+def payload_from_result(result: str, decryptor_name: str) -> str:
+    return clean_action_text(preview_fields_from_result(result, decryptor_name).get("payload"))
 
 
 def important_preview(
@@ -506,8 +605,7 @@ def important_preview(
             ensure_ascii=False,
         )
 
-    found: Dict[str, Any] = {"app": decryptor_name}
-    collect_preview_fields(parsed, found)
+    found = preview_fields_from_result(result, decryptor_name)
 
     if len(found) <= 1:
         return json.dumps(
