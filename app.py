@@ -355,7 +355,7 @@ def handle_update(update: Dict[str, Any]) -> None:
     sender = message.get("from") or {}
     allowed_users = parse_allowed_users(env_text("ALLOWED_USER_IDS"))
     if allowed_users and sender.get("id") not in allowed_users:
-        client.send_message(int(chat_id), "Sorry, ei bot private.")
+        client.send_message(int(chat_id), "Sorry, this bot is private.")
         return
 
     text = message.get("text") or ""
@@ -372,46 +372,46 @@ def handle_update(update: Dict[str, Any]) -> None:
         return
     if command == "/allowgroup":
         if not is_owner(sender):
-            client.send_message(int(chat_id), "Only owner ei command use korte parbe.")
+            client.send_message(int(chat_id), "Only the owner can use this command.")
             return
         if chat.get("type") == "private":
-            client.send_message(int(chat_id), "Je group-e full output chao, oi group-e /allowgroup dao.")
+            client.send_message(int(chat_id), "Run /allowgroup inside the group where you want full output.")
             return
         current_chat_id = int_value(chat_id)
         if current_chat_id is not None:
             RUNTIME_FULL_OUTPUT_CHAT_IDS.add(current_chat_id)
         client.send_message(
             int(chat_id),
-            "Ei group-e full output temporary on holo.\n"
-            "Permanent korte ei Chat ID FULL_OUTPUT_CHAT_IDS env-e add korte hobe.\n\n"
+            "Full output is temporarily enabled in this group.\n"
+            "To make it permanent, add this Chat ID to the FULL_OUTPUT_CHAT_IDS environment variable.\n\n"
             + full_output_status_line(sender, chat),
         )
         return
     if command == "/denygroup":
         if not is_owner(sender):
-            client.send_message(int(chat_id), "Only owner ei command use korte parbe.")
+            client.send_message(int(chat_id), "Only the owner can use this command.")
             return
         current_chat_id = int_value(chat_id)
         if current_chat_id is not None:
             RUNTIME_FULL_OUTPUT_CHAT_IDS.discard(current_chat_id)
         client.send_message(
             int(chat_id),
-            "Ei runtime-e group full output off holo.\n"
-            "Permanent off korte FULL_OUTPUT_CHAT_IDS env theke ID remove korte hobe.",
+            "Full output is disabled for this group in the current runtime.\n"
+            "To disable it permanently, remove this Chat ID from the FULL_OUTPUT_CHAT_IDS environment variable.",
         )
         return
     if command == "/fullstatus":
         client.send_message(int(chat_id), full_output_status_line(sender, chat))
         return
     if command == "/stats":
-        client.send_message(int(chat_id), "Stats feature ekhon off ache.")
+        client.send_message(int(chat_id), "The stats feature is currently disabled.")
         return
 
     document = find_document(message)
     if not document:
         client.send_message(
             int(chat_id),
-            "Ekta config file upload koro.\n\nSupported: .dark, .ehi, .hc, .ssc",
+            "Please upload a config file.\n\nSupported: .dark, .ehi, .hc, .ssc",
             reply_markup=start_keyboard(),
         )
         return
@@ -422,7 +422,7 @@ def handle_update(update: Dict[str, Any]) -> None:
         now = time.time()
         wait_for = int(spam_window - (now - LAST_USER_ACTION.get(sender_id, 0)))
         if wait_for > 0:
-            client.send_message(int(chat_id), f"Please {wait_for}s wait koro, tarpor next file pathao.")
+            client.send_message(int(chat_id), f"Please wait {wait_for}s before sending the next file.")
             return
         LAST_USER_ACTION[sender_id] = now
 
@@ -434,7 +434,7 @@ def handle_update(update: Dict[str, Any]) -> None:
     if file_size and file_size > max_file_size:
         client.send_message(
             int(chat_id),
-            f"File ta beshi boro. Limit: {max_file_size // (1024 * 1024)} MB.",
+            f"This file is too large. Limit: {max_file_size // (1024 * 1024)} MB.",
             reply_to_message_id=int(reply_to_message_id) if reply_to_message_id else None,
         )
         return
@@ -461,7 +461,7 @@ def handle_update(update: Dict[str, Any]) -> None:
         decryptor_name, result, errors, detected_name = run_decryptors(file_bytes, file_name)
         elapsed_ms = max(1, int((time.perf_counter() - started_at) * 1000))
     except Exception as exc:
-        client.edit_message(int(chat_id), processing_message_id, f"File process korte parlam na: {exc}")
+        client.edit_message(int(chat_id), processing_message_id, f"Could not process this file: {exc}")
         return
 
     if not result or not decryptor_name:

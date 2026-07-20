@@ -633,26 +633,68 @@ def v2ray_links_from_result(result: str, file_name: str, decryptor_name: str) ->
 
     found: Dict[str, Any] = {"app": decryptor_name}
     collect_preview_fields(parsed, found)
-    v2ray_config = found.get("v2ray_config")
-    if is_empty_output_value(v2ray_config):
-        return []
-
     links: list[str] = []
     name = v2ray_link_name(found, file_name)
-    for entry in v2ray_server_entries(v2ray_config):
-        protocol = str(entry.get("protocol") or "").strip().lower()
-        link: Optional[str] = None
-        if protocol == "vmess":
-            link = vmess_link(entry, name)
-        elif protocol == "trojan":
-            link = trojan_link(entry, name)
-        elif protocol == "vless":
-            link = vless_link(entry, name)
 
-        if link and link not in links:
-            links.append(link)
+    v2ray_config = found.get("v2ray_config")
+    if not is_empty_output_value(v2ray_config):
+        for entry in v2ray_server_entries(v2ray_config):
+            link = v2ray_link_from_entry(entry, name)
+            if link and link not in links:
+                links.append(link)
+
+    fallback_link = v2ray_link_from_fields(found, name)
+    if fallback_link and fallback_link not in links:
+        links.append(fallback_link)
 
     return links
+
+
+def v2ray_link_from_entry(entry: Dict[str, Any], name: str) -> Optional[str]:
+    protocol = str(entry.get("protocol") or "").strip().lower()
+    if protocol == "vmess":
+        return vmess_link(entry, name)
+    if protocol == "trojan":
+        return trojan_link(entry, name)
+    if protocol == "vless":
+        return vless_link(entry, name)
+    return None
+
+
+def v2ray_link_from_fields(found: Dict[str, Any], name: str) -> Optional[str]:
+    protocol = str(found.get("type") or found.get("protocol") or "").strip().lower()
+    if protocol not in {"vless", "vmess", "trojan"}:
+        return None
+
+    address = found.get("server")
+    port = clean_port(found.get("port"))
+    if is_empty_output_value(address) or not port:
+        return None
+
+    security = str(found.get("security") or "").strip().lower()
+    tls = security if security in {"tls", "xtls", "reality"} else ""
+    if not tls and (str(port) == "443" or not is_empty_output_value(found.get("sni"))):
+        tls = "tls"
+
+    entry = clean_record(
+        {
+            "protocol": protocol,
+            "address": address,
+            "server": address,
+            "port": port,
+            "id": found.get("uuid"),
+            "uuid": found.get("uuid"),
+            "password": found.get("password"),
+            "security": found.get("security"),
+            "encryption": found.get("encryption") or ("none" if protocol == "vless" else found.get("security")),
+            "network": found.get("network"),
+            "host": found.get("host"),
+            "path": found.get("path"),
+            "serverName": found.get("sni") or (found.get("host") if tls else None),
+            "tls": tls,
+        }
+    )
+    return v2ray_link_from_entry(entry, name)
 
 
 def requester_name(sender: Dict[str, Any]) -> str:
@@ -1029,24 +1071,19 @@ def vless_link(entry: Dict[str, Any], name: str) -> Optional[str]:
 
 def v2ray_links_from_preview(preview: str, file_name: str, decryptor_name: str) -> list[str]:
     data = preview_object(preview, decryptor_name)
-    v2ray_config = data.get("v2ray_config")
-    if is_empty_output_value(v2ray_config):
-        return []
-
     links: list[str] = []
     name = v2ray_link_name(data, file_name)
-    for entry in v2ray_server_entries(v2ray_config):
-        protocol = str(entry.get("protocol") or "").strip().lower()
-        link: Optional[str] = None
-        if protocol == "vmess":
-            link = vmess_link(entry, name)
-        elif protocol == "trojan":
-            link = trojan_link(entry, name)
-        elif protocol == "vless":
-            link = vless_link(entry, name)
 
-        if link and link not in links:
-            links.append(link)
+    v2ray_config = data.get("v2ray_config")
+    if not is_empty_output_value(v2ray_config):
+        for entry in v2ray_server_entries(v2ray_config):
+            link = v2ray_link_from_entry(entry, name)
+            if link and link not in links:
+                links.append(link)
+
+    fallback_link = v2ray_link_from_fields(data, name)
+    if fallback_link and fallback_link not in links:
+        links.append(fallback_link)
 
     return links
 
@@ -1114,31 +1151,31 @@ def help_text() -> str:
         "- HTTP Custom: <code>.hc</code>\n"
         "- SSC Custom: <code>.ssc</code>\n\n"
         "Commands:\n"
-        "- <code>/id</code> - tomar Telegram ID\n"
+        "- <code>/id</code> - your Telegram ID\n"
         "- <code>/chatid</code> - current chat/group ID\n"
-        "- <code>/allowgroup</code> - owner only, ei group-e full output on\n\n"
-        "Full output shudhu owner private chat/allowed group-e on thakbe."
+        "- <code>/allowgroup</code> - owner only, enable full output in this group\n\n"
+        "Full output is available only in the owner's private chat or allowed groups."
     )
 
 
 def fail_message(file_name: str, detected_name: Optional[str], errors: Tuple[str, ...]) -> str:
     if is_npv_file(file_name):
         return (
-            "NPV/NPVT file detect hoyeche, kintu NPV support ekhon off rakha ache.\n\n"
-            "Onno supported file pathao: .dark, .ehi, .hc, .ssc"
+            "NPV/NPVT file detected, but NPV support is currently disabled.\n\n"
+            "Please send a supported file: .dark, .ehi, .hc, .ssc"
         )
 
     if detected_name:
         details = "\n".join(f"- {error}" for error in errors[-2:])
         return (
-            f"{detected_name} file detect hoyeche, kintu unlock korte parlam na.\n\n"
-            "Possible reason: new format, locked config, corrupt file, ba unsupported version.\n"
+            f"{detected_name} file detected, but it could not be unlocked.\n\n"
+            "Possible reason: new format, locked config, corrupt file, or unsupported version.\n"
             f"{details}"
         )
 
     details = "\n".join(f"- {error}" for error in errors[-4:])
     return (
-        "Ei file ta supported format hisebe detect korte parlam na.\n\n"
+        "This file was not detected as a supported format.\n\n"
         "Supported: Dark Tunnel, HTTP Injector, HTTP Custom, SSC Custom.\n"
         f"{details}"
     )
@@ -1186,7 +1223,7 @@ def run_decryptors(file_bytes: bytes, file_name: str) -> Tuple[Optional[str], Op
         if result:
             return name, clean_result_text(str(result)), tuple(errors), detected["name"] if detected else None
 
-        errors.append(f"{name}: format/version match koreni")
+        errors.append(f"{name}: format/version did not match")
 
     return None, None, tuple(errors), detected["name"] if detected else None
 
@@ -1437,9 +1474,9 @@ class Default(WorkerEntrypoint):
         if data == "supported":
             text = "Supported: .dark, .ehi, .hc, .ssc"
         elif data == "full_txt":
-            text = "Full raw TXT safety reason-e off ache."
+            text = "Full raw TXT is disabled for safety."
         elif data == "raw_json":
-            text = "Raw JSON safety reason-e off ache. Bot safe preview dibe."
+            text = "Raw JSON is disabled for safety. The bot will send a safe preview."
         else:
             text = "OK"
 
@@ -1469,7 +1506,7 @@ class Default(WorkerEntrypoint):
         if allowed_users and sender.get("id") not in allowed_users:
             await TelegramClient(token).send_message(
                 int(chat_id),
-                "Sorry, ei bot private.",
+                "Sorry, this bot is private.",
             )
             return
 
@@ -1479,7 +1516,7 @@ class Default(WorkerEntrypoint):
         if command == "/stats":
             await client.send_message(
                 int(chat_id),
-                "Stats feature ekhon off ache.",
+                "The stats feature is currently disabled.",
                 parse_mode="HTML",
             )
             return
@@ -1497,7 +1534,7 @@ class Default(WorkerEntrypoint):
         if not document:
             await client.send_message(
                 int(chat_id),
-                "Ekta config file upload koro.\n\nSupported: .dark, .ehi, .hc, .ssc",
+                "Please upload a config file.\n\nSupported: .dark, .ehi, .hc, .ssc",
                 reply_markup=start_keyboard(),
             )
             return
@@ -1514,7 +1551,7 @@ class Default(WorkerEntrypoint):
             if wait_for > 0:
                 await client.send_message(
                     int(chat_id),
-                    f"Please {wait_for}s wait koro, tarpor next file pathao.",
+                    f"Please wait {wait_for}s before sending the next file.",
                 )
                 return
             LAST_USER_ACTION[sender_id] = now
@@ -1526,7 +1563,7 @@ class Default(WorkerEntrypoint):
             await record_usage(self.env, file_name, False)
             await client.send_message(
                 int(chat_id),
-                f"File ta beshi boro. Limit: {max_file_size // (1024 * 1024)} MB.",
+                f"This file is too large. Limit: {max_file_size // (1024 * 1024)} MB.",
             )
             return
 
@@ -1560,7 +1597,7 @@ class Default(WorkerEntrypoint):
         try:
             file_bytes = await client.get_file_bytes(document["file_id"])
         except Exception as exc:
-            message_text = f"File download korte parlam na: {exc}"
+            message_text = f"Could not download this file: {exc}"
             await record_usage(self.env, file_name, False)
             await client.safe_edit_message(int(chat_id), processing_message_id, message_text)
             if not processing_message_id:
