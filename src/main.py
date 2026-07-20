@@ -489,7 +489,11 @@ def collect_preview_fields(value: Any, found: Dict[str, Any]) -> None:
             collect_preview_fields(item, found)
 
 
-def important_preview(result: str, decryptor_name: str) -> str:
+def important_preview(
+    result: str,
+    decryptor_name: str,
+    show_sensitive_fields: bool = SHOW_SENSITIVE_FIELDS,
+) -> str:
     try:
         parsed = parse_nested_json(json.loads(result))
     except Exception:
@@ -515,7 +519,7 @@ def important_preview(result: str, decryptor_name: str) -> str:
             ensure_ascii=False,
         )
 
-    ordered_keys = (
+    ordered_keys = [
         "app",
         "type",
         "name",
@@ -531,7 +535,16 @@ def important_preview(result: str, decryptor_name: str) -> str:
         "path",
         "security",
         "encryption",
-    )
+    ]
+    if show_sensitive_fields:
+        ordered_keys.extend(
+            [
+                "uuid",
+                "username",
+                "password",
+                "payload",
+            ]
+        )
     preview = {key: found[key] for key in ordered_keys if key in found}
     return json.dumps(preview, indent=4, ensure_ascii=False)
 

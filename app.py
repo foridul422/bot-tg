@@ -56,6 +56,17 @@ def can_send_import_links(sender: Dict[str, Any], chat: Dict[str, Any]) -> bool:
     if not env_bool("ENABLE_IMPORT_LINKS"):
         return False
 
+    return is_allowed_private_output(sender, chat)
+
+
+def can_send_sensitive_fields(sender: Dict[str, Any], chat: Dict[str, Any]) -> bool:
+    if not env_bool("SHOW_SENSITIVE_FIELDS"):
+        return False
+
+    return is_allowed_private_output(sender, chat)
+
+
+def is_allowed_private_output(sender: Dict[str, Any], chat: Dict[str, Any]) -> bool:
     allowed_users = parse_allowed_users(env_text("ALLOWED_USER_IDS"))
     sender_id = sender.get("id")
     if allowed_users:
@@ -294,7 +305,11 @@ def handle_update(update: Dict[str, Any]) -> None:
         client.edit_message(int(chat_id), processing_message_id, fail_message(file_name, detected_name, errors))
         return
 
-    preview = important_preview(result, decryptor_name)
+    preview = important_preview(
+        result,
+        decryptor_name,
+        can_send_sensitive_fields(sender, chat),
+    )
     client.send_message(
         int(chat_id),
         designed_message(
