@@ -1190,10 +1190,9 @@ async def notify_admins(client: "TelegramClient", raw_admin_ids: str, text: str)
 
 
 def find_document(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    for key in ("document", "audio", "video"):
-        value = message.get(key)
-        if isinstance(value, dict) and value.get("file_id"):
-            return value
+    value = message.get("document")
+    if isinstance(value, dict) and value.get("file_id"):
+        return value
     return None
 
 
@@ -1501,6 +1500,13 @@ class Default(WorkerEntrypoint):
         if chat_id is None:
             return
 
+        client = TelegramClient(token)
+        text = message.get("text") or ""
+        command = text.split(maxsplit=1)[0].split("@", 1)[0].lower() if text.startswith("/") else ""
+        document = find_document(message)
+        if not command and not document:
+            return
+
         sender = message.get("from") or {}
         allowed_users = parse_allowed_users(env_text(self.env, "ALLOWED_USER_IDS"))
         if allowed_users and sender.get("id") not in allowed_users:
@@ -1510,9 +1516,6 @@ class Default(WorkerEntrypoint):
             )
             return
 
-        client = TelegramClient(token)
-        text = message.get("text") or ""
-        command = text.split(maxsplit=1)[0].split("@", 1)[0].lower() if text else ""
         if command == "/stats":
             await client.send_message(
                 int(chat_id),
@@ -1521,7 +1524,7 @@ class Default(WorkerEntrypoint):
             )
             return
 
-        if text.startswith("/start") or text.startswith("/help"):
+        if command == "/start" or command == "/help":
             await client.send_message(
                 int(chat_id),
                 help_text(),
@@ -1530,13 +1533,7 @@ class Default(WorkerEntrypoint):
             )
             return
 
-        document = find_document(message)
         if not document:
-            await client.send_message(
-                int(chat_id),
-                "Please upload a config file.\n\nSupported: .dark, .ehi, .hc, .ssc",
-                reply_markup=start_keyboard(),
-            )
             return
 
         sender_id = sender.get("id")

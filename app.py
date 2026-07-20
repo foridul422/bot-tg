@@ -352,14 +352,18 @@ def handle_update(update: Dict[str, Any]) -> None:
     if chat_id is None:
         return
 
+    text = message.get("text") or ""
+    command = text.split(maxsplit=1)[0].split("@", 1)[0].lower() if text.startswith("/") else ""
+    document = find_document(message)
+    if not command and not document:
+        return
+
     sender = message.get("from") or {}
     allowed_users = parse_allowed_users(env_text("ALLOWED_USER_IDS"))
     if allowed_users and sender.get("id") not in allowed_users:
         client.send_message(int(chat_id), "Sorry, this bot is private.")
         return
 
-    text = message.get("text") or ""
-    command = text.split(maxsplit=1)[0].split("@", 1)[0].lower() if text else ""
     if command == "/start" or command == "/help":
         client.send_message(int(chat_id), help_text(), parse_mode="HTML", reply_markup=start_keyboard())
         return
@@ -407,13 +411,7 @@ def handle_update(update: Dict[str, Any]) -> None:
         client.send_message(int(chat_id), "The stats feature is currently disabled.")
         return
 
-    document = find_document(message)
     if not document:
-        client.send_message(
-            int(chat_id),
-            "Please upload a config file.\n\nSupported: .dark, .ehi, .hc, .ssc",
-            reply_markup=start_keyboard(),
-        )
         return
 
     sender_id = sender.get("id")
