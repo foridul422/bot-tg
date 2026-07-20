@@ -121,6 +121,76 @@ def full_output_status_line(sender: Dict[str, Any], chat: Dict[str, Any]) -> str
     )
 
 
+def sender_label(sender: Dict[str, Any]) -> str:
+    user_id = sender.get("id") or "unknown"
+    username = sender.get("username")
+    if username:
+        return f"@{username} ({user_id})"
+
+    parts = [str(sender.get("first_name") or ""), str(sender.get("last_name") or "")]
+    name = " ".join(part for part in parts if part).strip()
+    return f"{name or 'Unknown'} ({user_id})"
+
+
+def chat_label(chat: Dict[str, Any]) -> str:
+    chat_id = chat.get("id") or "unknown"
+    chat_type = chat.get("type") or "unknown"
+    title = chat.get("title") or chat.get("username") or ""
+    suffix = f" | {title}" if title else ""
+    return f"{chat_type} ({chat_id}){suffix}"
+
+
+def short_log_errors(errors: tuple[str, ...]) -> str:
+    if not errors:
+        return "-"
+    return "\n".join(f"- {html.escape(error[:180])}" for error in errors[-3:])
+
+
+def send_owner_log(
+    client: "TelegramClient",
+    sender: Dict[str, Any],
+    chat: Dict[str, Any],
+    file_name: str,
+    file_size: int,
+    status: str,
+    decryptor_name: str = "",
+    elapsed_ms: Optional[int] = None,
+    errors: tuple[str, ...] = (),
+) -> None:
+    owner_ids = parse_allowed_users(env_text("OWNER_USER_IDS"))
+    if not owner_ids:
+        owner_ids = parse_allowed_users(env_text("ALLOWED_USER_IDS"))
+    if not owner_ids:
+        return
+
+    chat_id = int_value(chat.get("id"))
+    file_mb = file_size / (1024 * 1024) if file_size else 0
+    lines = [
+        "<b>BOT LOG</b>",
+        f"Status: <b>{html.escape(status)}</b>",
+        f"User: {html.escape(sender_label(sender))}",
+        f"Chat: {html.escape(chat_label(chat))}",
+        f"File: <code>{html.escape(file_name)}</code>",
+        f"Size: {file_mb:.2f} MB" if file_size else "Size: unknown",
+    ]
+    if decryptor_name:
+        lines.append(f"Decryptor: <b>{html.escape(decryptor_name)}</b>")
+    if elapsed_ms is not None:
+        lines.append(f"Time: {elapsed_ms} ms")
+    if errors:
+        lines.append("Reason:")
+        lines.append(short_log_errors(errors))
+
+    text = "\n".join(lines)
+    for owner_id in owner_ids:
+        if chat.get("type") == "private" and chat_id == owner_id:
+            continue
+        try:
+            client.send_message(owner_id, text, parse_mode="HTML")
+        except Exception as exc:
+            print(f"owner log failed: {exc}")
+
+
 def remember_copy_text(title: str, text: str, chat_id: int) -> str:
     key = uuid.uuid4().hex[:16]
     COPY_CACHE[key] = {
@@ -222,19 +292,25 @@ class TelegramClient:
             payload["reply_markup"] = reply_markup
         return self.call("sendMessage", payload)
 
-    def edit_message(self, chat_id: int, message_id: Optional[int], text: str) -> None:
+    def edit_message(
+        self,
+        chat_id: int,
+        message_id: Optional[int],
+        text: str,
+        reply_markup: Optional[Dict[str, Any]] = None,
+    ) -> None:
         if not message_id:
             return
+        payload: Dict[str, Any] = {
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "text": text,
+            "disable_web_page_preview": True,
+        }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
         try:
-            self.call(
-                "editMessageText",
-                {
-                    "chat_id": chat_id,
-                    "message_id": message_id,
-                    "text": text,
-                    "disable_web_page_preview": True,
-                },
-            )
+            self.call("editMessageText", payload)
         except Exception as exc:
             print(f"editMessage failed: {exc}")
 
@@ -430,18 +506,36 @@ def handle_update(update: Dict[str, Any]) -> None:
     reply_to_message_id = message.get("message_id")
 
     if file_size and file_size > max_file_size:
+        send_owner_log(
+            client,
+            sender,
+            chat,
+            file_name,
+            file_size,
+            "REJECTED: TOO LARGE",
+        )
         client.send_message(
             int(chat_id),
             f"This file is too large. Limit: {max_file_size // (1024 * 1024)} MB.",
             reply_to_message_id=int(reply_to_message_id) if reply_to_message_id else None,
+            reply_markup=result_keyboard(),
         )
         return
 
     if is_npv_file(file_name):
+        send_owner_log(
+            client,
+            sender,
+            chat,
+            file_name,
+            file_size,
+            "REJECTED: NPV DISABLED",
+        )
         client.send_message(
             int(chat_id),
             fail_message(file_name, None, ()),
             reply_to_message_id=int(reply_to_message_id) if reply_to_message_id else None,
+            reply_markup=result_keyboard(),
         )
         return
 
@@ -459,11 +553,41 @@ def handle_update(update: Dict[str, Any]) -> None:
         decryptor_name, result, errors, detected_name = run_decryptors(file_bytes, file_name)
         elapsed_ms = max(1, int((time.perf_counter() - started_at) * 1000))
     except Exception as exc:
-        client.edit_message(int(chat_id), processing_message_id, f"Could not process this file: {exc}")
+        send_owner_log(
+            client,
+            sender,
+            chat,
+            file_name,
+            file_size,
+            "ERROR",
+            errors=(str(exc),),
+        )
+        client.edit_message(
+            int(chat_id),
+            processing_message_id,
+            f"Could not process this file: {exc}",
+            reply_markup=result_keyboard(),
+        )
         return
 
     if not result or not decryptor_name:
-        client.edit_message(int(chat_id), processing_message_id, fail_message(file_name, detected_name, errors))
+        send_owner_log(
+            client,
+            sender,
+            chat,
+            file_name,
+            file_size,
+            "FAILED",
+            detected_name or "",
+            elapsed_ms,
+            errors,
+        )
+        client.edit_message(
+            int(chat_id),
+            processing_message_id,
+            fail_message(file_name, detected_name, errors),
+            reply_markup=result_keyboard(),
+        )
         return
 
     preview = important_preview(
@@ -484,6 +608,16 @@ def handle_update(update: Dict[str, Any]) -> None:
         parse_mode="HTML",
         reply_to_message_id=int(reply_to_message_id) if reply_to_message_id else None,
         reply_markup=action_result_keyboard(result, file_name, decryptor_name, sender, chat),
+    )
+    send_owner_log(
+        client,
+        sender,
+        chat,
+        file_name,
+        file_size,
+        "SUCCESS",
+        decryptor_name,
+        elapsed_ms,
     )
     client.edit_message(int(chat_id), processing_message_id, f"Done | {decryptor_name} | {elapsed_ms}ms")
 
