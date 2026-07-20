@@ -1046,7 +1046,11 @@ def help_text() -> str:
         "- HTTP Injector: <code>.ehi</code>\n"
         "- HTTP Custom: <code>.hc</code>\n"
         "- SSC Custom: <code>.ssc</code>\n\n"
-        "Bot ekhon safe preview mode-e ache. Copy-ready link, password, UUID, payload, raw TXT off."
+        "Commands:\n"
+        "- <code>/id</code> - tomar Telegram ID\n"
+        "- <code>/chatid</code> - current chat/group ID\n"
+        "- <code>/allowgroup</code> - owner only, ei group-e full output on\n\n"
+        "Full output shudhu owner private chat/allowed group-e on thakbe."
     )
 
 

@@ -10,3 +10,11 @@ services:
         value: "5242880"
       - key: SPAM_WINDOW_SECONDS
         value: "8"
+      - key: ENABLE_IMPORT_LINKS
+        value: "true"
+      - key: SHOW_SENSITIVE_FIELDS
+        value: "true"
+      - key: OWNER_USER_IDS
+        value: "5802122865"
+      - key: FULL_OUTPUT_CHAT_IDS
+        value: ""

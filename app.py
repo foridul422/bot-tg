@@ -32,6 +32,7 @@ from main import (  # noqa: E402
 )
 
 app = Flask(__name__)
+RUNTIME_FULL_OUTPUT_CHAT_IDS: set[int] = set()
 
 
 def env_text(name: str, default: str = "") -> str:
@@ -52,6 +53,30 @@ def env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def int_value(value: Any) -> Optional[int]:
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def is_owner(sender: Dict[str, Any]) -> bool:
+    owner_ids = parse_allowed_users(env_text("OWNER_USER_IDS"))
+    if not owner_ids:
+        owner_ids = parse_allowed_users(env_text("ALLOWED_USER_IDS"))
+    sender_id = sender.get("id")
+    return isinstance(sender_id, int) and sender_id in owner_ids
+
+
+def is_full_output_chat(chat: Dict[str, Any]) -> bool:
+    chat_id = int_value(chat.get("id"))
+    if chat_id is None:
+        return False
+
+    configured_ids = parse_allowed_users(env_text("FULL_OUTPUT_CHAT_IDS"))
+    return chat_id in configured_ids or chat_id in RUNTIME_FULL_OUTPUT_CHAT_IDS
+
+
 def can_send_import_links(sender: Dict[str, Any], chat: Dict[str, Any]) -> bool:
     if not env_bool("ENABLE_IMPORT_LINKS"):
         return False
@@ -67,12 +92,26 @@ def can_send_sensitive_fields(sender: Dict[str, Any], chat: Dict[str, Any]) -> b
 
 
 def is_allowed_private_output(sender: Dict[str, Any], chat: Dict[str, Any]) -> bool:
-    allowed_users = parse_allowed_users(env_text("ALLOWED_USER_IDS"))
-    sender_id = sender.get("id")
-    if allowed_users:
-        return sender_id in allowed_users
+    if not is_owner(sender):
+        return False
 
-    return chat.get("type") == "private"
+    if chat.get("type") == "private":
+        return True
+
+    return is_full_output_chat(chat)
+
+
+def full_output_status_line(sender: Dict[str, Any], chat: Dict[str, Any]) -> str:
+    chat_id = chat.get("id") or "unknown"
+    chat_type = chat.get("type") or "unknown"
+    owner_status = "yes" if is_owner(sender) else "no"
+    enabled_status = "yes" if is_allowed_private_output(sender, chat) else "no"
+    return (
+        f"Chat ID: {chat_id}\n"
+        f"Chat type: {chat_type}\n"
+        f"Owner matched: {owner_status}\n"
+        f"Full output here: {enabled_status}"
+    )
 
 
 class TelegramClient:
@@ -239,6 +278,42 @@ def handle_update(update: Dict[str, Any]) -> None:
     if command == "/id":
         user_id = sender.get("id") or "unknown"
         client.send_message(int(chat_id), f"Your Telegram ID: {user_id}")
+        return
+    if command == "/chatid":
+        client.send_message(int(chat_id), full_output_status_line(sender, chat))
+        return
+    if command == "/allowgroup":
+        if not is_owner(sender):
+            client.send_message(int(chat_id), "Only owner ei command use korte parbe.")
+            return
+        if chat.get("type") == "private":
+            client.send_message(int(chat_id), "Je group-e full output chao, oi group-e /allowgroup dao.")
+            return
+        current_chat_id = int_value(chat_id)
+        if current_chat_id is not None:
+            RUNTIME_FULL_OUTPUT_CHAT_IDS.add(current_chat_id)
+        client.send_message(
+            int(chat_id),
+            "Ei group-e full output temporary on holo.\n"
+            "Permanent korte ei Chat ID FULL_OUTPUT_CHAT_IDS env-e add korte hobe.\n\n"
+            + full_output_status_line(sender, chat),
+        )
+        return
+    if command == "/denygroup":
+        if not is_owner(sender):
+            client.send_message(int(chat_id), "Only owner ei command use korte parbe.")
+            return
+        current_chat_id = int_value(chat_id)
+        if current_chat_id is not None:
+            RUNTIME_FULL_OUTPUT_CHAT_IDS.discard(current_chat_id)
+        client.send_message(
+            int(chat_id),
+            "Ei runtime-e group full output off holo.\n"
+            "Permanent off korte FULL_OUTPUT_CHAT_IDS env theke ID remove korte hobe.",
+        )
+        return
+    if command == "/fullstatus":
+        client.send_message(int(chat_id), full_output_status_line(sender, chat))
         return
     if command == "/stats":
         client.send_message(int(chat_id), "Stats feature ekhon off ache.")
