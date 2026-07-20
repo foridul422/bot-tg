@@ -38,7 +38,7 @@ ENABLE_USAGE_STATS = False
 SPARKLES = "\u2728"
 PERSON_ICON = "\U0001f464"
 STOPWATCH_ICON = "\u23f1"
-DROP_OUTPUT_KEY_PARTS = ("note", "lockedappconfig")
+DROP_OUTPUT_KEY_PARTS = ("lockedappconfig",)
 NPV_EXTENSIONS = (".npv", ".npvt", ".npv.txt", ".npvt.txt")
 LAST_USER_ACTION: dict[int, float] = {}
 USAGE_STATS_MEMORY: Dict[str, Any] = {}
@@ -543,29 +543,7 @@ def clean_action_text(value: Any, max_len: int = 2400) -> str:
 
 def result_note_from_result(result: str, file_name: str, decryptor_name: str) -> str:
     found = preview_fields_from_result(result, decryptor_name)
-    pieces: list[str] = []
-
-    note = clean_action_text(found.get("note"), 180)
-    name = clean_action_text(found.get("name"), 180)
-    app = clean_action_text(found.get("app") or decryptor_name, 80)
-    config_type = clean_action_text(found.get("type") or found.get("protocol"), 80)
-    server = clean_action_text(found.get("server") or found.get("host"), 160)
-
-    if note:
-        pieces.append(note)
-    elif name:
-        pieces.append(name)
-    elif file_name:
-        pieces.append(file_name)
-
-    if app:
-        pieces.append(f"App: {app}")
-    if config_type:
-        pieces.append(f"Type: {config_type.upper()}")
-    if server:
-        pieces.append(f"Server: {server}")
-
-    return " | ".join(dict.fromkeys(pieces)) or f"App: {decryptor_name}"
+    return clean_action_text(found.get("note")) or "Note not found"
 
 
 def ssh_info_from_result(result: str, decryptor_name: str) -> str:
@@ -1111,9 +1089,6 @@ def designed_message(
     requester_text = plain_html_text(requester) or "USER"
     section_line = "━" * 30
     server_info = server_information(preview, title)
-    config_json = config_json_preview(preview, title)
-    code_chunk = display_result_chunk(config_json, prefer_second_chunk)
-    escaped_json = html.escape(code_chunk, quote=False)
     return (
         "┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\n"
         "┃       🔓 DECRYPTOR BOT       ┃\n"
@@ -1126,13 +1101,7 @@ def designed_message(
         f"{section_line}\n"
         f"🌐 <b>SERVER INFORMATION</b>\n"
         f"{section_line}\n\n"
-        f"{html.escape(server_info, quote=False)}\n\n"
-        f"{section_line}\n"
-        f"📄 <b>CONFIG JSON</b>\n"
-        f"{section_line}\n\n"
-        f"<pre><code class=\"language-json\">"
-        f"{escaped_json}"
-        f"</code></pre>"
+        f"{html.escape(server_info, quote=False)}"
     )
 
 
